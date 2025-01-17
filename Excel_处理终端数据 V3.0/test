@@ -1,0 +1,170 @@
+import pandas as pd
+import os
+from copy_sheet import copy_sheet_data
+#from copy_to_template import copy_data_to_template # 这个模块在process_sn_data函数中没有被实际使用，可以注释掉
+#from insert_columns import insert_columns # 这个模块在process_sn_data函数中没有被实际使用，可以注释掉
+
+def sort_and_save_sn_data(filepath, sheet_name, save_filepath):
+    """读取SN数据，根据rms_access_code排序并保存到新文件"""
+
+    print("-" * 30)
+    print(f"开始执行 sort_and_save_sn_data 函数")
+    print(f"原始文件路径：{filepath}")
+    print(f"保存文件路径：{save_filepath}")
+
+    try:
+        print(f"尝试读取Excel文件...")
+        df = pd.read_excel(filepath, sheet_name=sheet_name, engine='openpyxl')
+        print(f"Excel文件读取成功。")
+        print(f"文件信息:\n{df.info()}")
+        if not df.empty:
+            print(f"数据前5行:\n{df.head()}")
+        else:
+            print("警告：读取到的DataFrame为空！")
+            return False
+    except FileNotFoundError:
+        print(f"错误：文件 {filepath} 未找到。请检查文件路径是否正确。")
+        return False
+    except ValueError as e:
+        print(f"错误：工作表 {sheet_name} 在文件 {filepath} 中不存在。错误信息：{e}。请检查工作表名称是否正确。")
+        return False
+    except Exception as e:
+        print(f"读取文件出错：{e}")
+        return False
+
+    if df.empty:
+        print(f"警告：文件{filepath}的{sheet_name}工作表为空，无法进行后续操作。")
+        return False
+
+    if 'rms_access_code' not in df.columns:
+        print("错误：SN数据文件中缺少 rms_access_code 列，无法排序。请检查文件格式。")
+        return False
+
+    try:
+        print("尝试排序数据...")
+        df_sorted = df.sort_values(by='rms_access_code')
+        print("数据排序成功。")
+        if not df_sorted.empty:
+            print(f"排序后数据前5行:\n{df_sorted.head()}")
+        else:
+            print("警告：排序后的DataFrame为空！可能是原始数据就为空或只有表头。")
+            return False
+
+        save_dir = os.path.dirname(save_filepath)
+        print(f"保存目录：{save_dir}")
+        if not os.path.exists(save_dir):
+            print(f"目录 {save_dir} 不存在，正在创建...")
+            os.makedirs(save_dir, exist_ok=True)
+            print(f"目录 {save_dir} 创建成功。")
+        else:
+            print(f"目录 {save_dir} 已存在。")
+
+        print("尝试保存排序后的数据到文件...")
+        df_sorted.to_excel(save_filepath, index=False, engine='openpyxl')
+        print(f"文件是否保存成功：{os.path.exists(save_filepath)}")
+        if os.path.exists(save_filepath):
+            print(f"SN数据已排序并保存到：{save_filepath}")
+        else:
+            print(f"严重错误：文件 {save_filepath} 保存失败！请检查磁盘空间、权限等问题。")
+            return False
+        return True
+    except Exception as e:
+        print(f"排序并保存文件时发生未知错误：{e}")
+        return False
+    finally:
+         print(f"sort_and_save_sn_data 函数执行完毕")
+         print("-" * 30)
+
+def get_loid_sn(filepath, sheet_name, business_numbers):
+    """根据业务号码在排序后的SN数据文件中查找对应的LOID（SN码）"""
+    print("-" * 30)
+    print("开始执行 get_loid_sn 函数")
+    print(f"文件路径：{filepath}")
+    print(f"待查找的业务号码：{business_numbers}")
+    try:
+        sn_df = pd.read_excel(filepath, sheet_name=sheet_name, engine='openpyxl')
+        print("SN 数据文件读取成功。")
+        if 'rms_access_code' not in sn_df.columns or 'ce_loid' not in sn_df.columns:
+            print("错误：SN数据文件中缺少 rms_access_code 或 ce_loid 列，无法进行 vlookup。")
+            return None
+
+        loid_sn_list = []
+        for business_number in business_numbers:
+            matching_rows = sn_df[sn_df['rms_access_code'] == business_number]
+            if not matching_rows.empty:
+                loid_sn = matching_rows['ce_loid'].iloc[0]
+                loid_sn_list.append(loid_sn)
+            else:
+                loid_sn_list.append("")  # 如果找不到匹配的业务号码，则添加空字符串
+        print(f"查找结果：{loid_sn_list}")
+        print("get_loid_sn 函数执行完毕")
+        print("-" * 30)
+        return loid_sn_list
+    except FileNotFoundError:
+        print(f"错误：文件 {filepath} 未找到。")
+        return None
+    except ValueError as e:
+        print(f"错误：工作表 {sheet_name} 在文件 {filepath} 中不存在。错误信息：{e}")
+        return None
+    except Exception as e:
+        print(f"查找LOID（SN码）时发生错误：{e}")
+        return None
+
+def process_sn_data(source_filepath, source_sheet, template_filepath, dest_filepath, result_sheet):
+    """处理主流程数据：先复制，后在目标文件上按正确条件筛选，并保存到新子表"""
+    print("-" * 30)
+    print("开始执行 process_sn_data 函数")
+    print(f"源文件路径：{source_filepath}, 源工作表：{source_sheet}")
+    print(f"目标文件路径：{dest_filepath}, 结果工作表：{result_sheet}")
+    print(f"模板文件路径：{template_filepath}")
+
+    try:
+        # 1. 复制工作表
+        print("开始复制工作表...")
+        if not copy_sheet_data(source_filepath, source_sheet, dest_filepath, result_sheet):
+            print("复制工作表数据失败！")
+            return False
+        print("工作表复制完成。")
+
+        # 2. 读取目标文件中的复制数据
+        print("尝试读取目标文件中的复制数据...")
+        try:
+            df = pd.read_excel(dest_filepath, sheet_name=result_sheet, engine='openpyxl')
+            print("目标文件数据读取成功。")
+            if not df.empty:
+                print(f"目标文件数据前5行:\n{df.head()}")
+            else:
+                print("警告：目标文件读取到的DataFrame为空")
+                return False
+        except ValueError as e:
+            print(f"读取目标文件数据失败：{e}。请检查工作表 '{result_sheet}' 是否存在。")
+            return False
+        except FileNotFoundError as e:
+            print(f"读取目标文件数据失败：{e}。请检查文件是否存在")
+            return False
+        except Exception as e:
+            print(f"读取目标文件时发生其他错误：{e}")
+            return False
+
+        if df.empty:
+            print(f"警告：目标文件{dest_filepath}的{result_sheet}工作表为空，无法进行后续操作。")
+            return False
+
+        # 3. 在目标文件的数据上进行 *正确* 的筛选
+        print("开始筛选数据...")
+        mask = (df['终端4级目录名称'].str.contains('A8C', na=False) | df['终端4级目录名称'].str.contains('光猫', na=False)) & \
+               (df['业务工单回单类型'].str.contains('在途', na=False)) & \
+               (~df['条形码'].isin(['', "'", "''", " ", None]))
+        filtered_df = df[mask].copy() # 加上.copy()，避免SettingWithCopyWarning
+        print("数据筛选完成。")
+
+
+        terminal_data_processing/
+├── main.py
+├── modules/
+│   ├── sn_data_process.py
+│   ├── copy_sheet.py
+│   ├── insert_columns.py
+│   ├── vlookup_module.py
+│   └── __init__.py  # 可以是空文件
+└── requirements.txt
